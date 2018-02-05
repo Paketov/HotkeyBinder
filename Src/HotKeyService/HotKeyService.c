@@ -209,7 +209,7 @@ __declspec(dllexport) void WINAPI ServiceMain(/*DWORD argc, LPWSTR *argv*/) {
 			&ReadedSize
 		) != ERROR_SUCCESS
 	) {
-		OutputDebugString(TEXT("HotKeyBinder: RegGetValueW(\"LocalSystemNetworkRestricted\") failed"));
+		OutputDebugString(TEXT("HotKeyBinder: RegGetValueW(\"Config\") failed"));
 		goto lblExit;
 	}
 	if((ConfigBuf = (WCHAR*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, ReadedSize)) == NULL) {
@@ -228,7 +228,7 @@ __declspec(dllexport) void WINAPI ServiceMain(/*DWORD argc, LPWSTR *argv*/) {
 			&ReadedSize
 		) != ERROR_SUCCESS
 	) {
-		OutputDebugString(TEXT("HotKeyBinder: RegGetValueW(\"LocalSystemNetworkRestricted\") failed"));
+		OutputDebugString(TEXT("HotKeyBinder: RegGetValueW(\"Config\") failed"));
 		goto lblExit;
 	}
 	c = ConfigBuf;
@@ -333,7 +333,7 @@ __declspec(dllexport) VOID WINAPI SetSettings() {
 		OutputDebugString(TEXT("HotKeyBinder: empty config file"));
 		return;
 	}
-	FileBuf = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, FileSize);
+	FileBuf = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, FileSize + (sizeof(WCHAR) * 2));
 	if(FileBuf == NULL) {
 		OutputDebugString(TEXT("HotKeyBinder: HeapAlloc() failed"));
 		return;
