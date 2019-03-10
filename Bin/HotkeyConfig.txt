@@ -1,0 +1,4 @@
+Alt + F9 => Volume Down
+Alt + F10 => Volume Up
+Alt + F8 => Volume Mute
+Alt + F7 => "\"C:\Windows\notepad.exe\" gg.txt" => "C:\Windows\notepad.exe vv.txt"

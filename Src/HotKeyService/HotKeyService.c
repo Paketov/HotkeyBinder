@@ -22,6 +22,7 @@
 typedef struct HOT_KEYS {
 	WORD		HotKeys[4];
 	UWORD		Count;
+	WCHAR*		launchProgramm;
 } HOT_KEYS;
 
 typedef struct HOT_KEY_INFO {
@@ -54,6 +55,8 @@ static HANDLE hThread = NULL;
 #define WM_TERMINATE_THREAD (WM_USER+2)
 static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam);
 #define CpyConstString(DestStrBuf, ConstStr)  (memcpy(Dest, L ## ConstStr, sizeof( L ## ConstStr )), (sizeof( L ## ConstStr )/ sizeof(WCHAR) - 1))
+
+__declspec(dllexport) void LdDll();
 
 
 static void* __memset(void* _Dst, int _Val, UINT _Size) {
@@ -140,8 +143,19 @@ static int GetStrKey(LPWSTR* StartPos) {
 	return c - *StartPos;
 }
 
-static int ParseHotKeys(WORD* TargetKeyArr, uint32_t MaxKeyCount, LPWSTR* StartPos) {
-	uint32_t CurKeyCount = 0;
+static int GetStrLanunchProgramm(LPWSTR* StartPos) {
+	LPWSTR c = *StartPos;
+	for(; *c == L' ' || *c == L'\t'; c++);
+	if(*c != '"')
+		return 0;
+	c++;
+	*StartPos = c;
+	for(; !(*c == L'\0' || *c == L'\n' || (*c == L'"' && *(c - 1) != L'\\')); c++);
+	return c - *StartPos;
+}
+
+static int ParseHotKeys(HOT_KEYS* TargetKeyArr, uint32_t MaxKeyCount, LPWSTR* StartPos) {
+	int CurKeyCount = 0;
 	LPWSTR c = *StartPos;
 	WORD CurKey;
 	int KeyLen;
@@ -153,17 +167,27 @@ static int ParseHotKeys(WORD* TargetKeyArr, uint32_t MaxKeyCount, LPWSTR* StartP
 		}
 		if(*c == L'\0' || *c == L'\r' || *c == L'\n')
 			return 0;
-		if((KeyLen = GetStrKey(&c)) == 0) {
+		if((KeyLen = GetStrLanunchProgramm(&c)) != 0) {
+			TargetKeyArr->launchProgramm = (WCHAR*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, (KeyLen + 2) * sizeof(WCHAR));
+			for(WCHAR* c1 = c, *cm = c1 + KeyLen, *c2 = TargetKeyArr->launchProgramm; c1 < cm; c1++, c2++) {
+				if(c1[0] == L'\\' && c1[1] == L'"') {
+					c1++;
+				}
+				*c2 = *c1;
+			}
+			KeyLen++;
+		}else if((KeyLen = GetStrKey(&c)) != 0) {
+			if((CurKey = ParseKey(c, KeyLen)) == 0) {
+				//Error = ERROR_INVALID_DATA;
+				OutputDebugString(TEXT("HotKeyBinder: Hotkey parse fail"));
+				return -1;
+			}		
+			TargetKeyArr->HotKeys[CurKeyCount++] = CurKey;
+		} else {
 			//Error = ERROR_INVALID_DATA;
 			OutputDebugString(TEXT("HotKeyBinder: Hotkey parse fail"));
 			return -1;
 		}
-		if((CurKey = ParseKey(c, KeyLen)) == 0) {
-			//Error = ERROR_INVALID_DATA;
-			OutputDebugString(TEXT("HotKeyBinder: Hotkey parse fail"));
-			return -1;
-		}
-		TargetKeyArr[CurKeyCount++] = CurKey;
 		c += KeyLen;
 
 		for(; *c == L' ' || *c == L'\t'; c++);
@@ -180,6 +204,7 @@ static int ParseHotKeys(WORD* TargetKeyArr, uint32_t MaxKeyCount, LPWSTR* StartP
 	*StartPos = c;
 	return CurKeyCount;
 }
+
 
 __declspec(dllexport) void WINAPI ServiceMain(/*DWORD argc, LPWSTR *argv*/) {
 	HOT_KEY_INFO* HotKey;
@@ -242,7 +267,7 @@ __declspec(dllexport) void WINAPI ServiceMain(/*DWORD argc, LPWSTR *argv*/) {
 	for(int i = 0; ; i++) {
 		HotKey = &HotKeys[i];
 		for(; *c == L'\r' || *c == L'\n'; c++);
-		if((CountKeys = ParseHotKeys(HotKey->Shortcut.HotKeys, 4, &c)) < 0) {
+		if((CountKeys = ParseHotKeys(&HotKey->Shortcut, 4, &c)) < 0) {
 			goto lblExit;
 		} else if(CountKeys == 0) {
 			//Error = ERROR_INVALID_DATA;
@@ -256,13 +281,13 @@ __declspec(dllexport) void WINAPI ServiceMain(/*DWORD argc, LPWSTR *argv*/) {
 				OutputDebugString(TEXT("HotKeyBinder: Emulate keys limit overflow"));
 				goto lblExit;
 			}
-			if((CountKeys = ParseHotKeys(HotKey->EmulKeys[HotKey->CountEmulKeys].HotKeys, 4, &c)) < 0) {
+			if((CountKeys = ParseHotKeys(&HotKey->EmulKeys[HotKey->CountEmulKeys], 4, &c)) < 0) {
 				goto lblExit;
-			} else if(CountKeys == 0 && HotKey->CountEmulKeys == 0) {
+			} else if(CountKeys == 0 && HotKey->CountEmulKeys == 0 && HotKey->EmulKeys[HotKey->CountEmulKeys].launchProgramm == NULL) {
 				//Error = ERROR_INVALID_DATA;
 				OutputDebugString(TEXT("HotKeyBinder: Hotkey parse fail"));
 				goto lblExit;
-			} else if(CountKeys == 0) {
+			} else if(CountKeys == 0 && HotKey->EmulKeys[HotKey->CountEmulKeys].launchProgramm == NULL) {
 				break;
 			}
 			HotKey->EmulKeys[HotKey->CountEmulKeys++].Count = CountKeys;
@@ -295,6 +320,20 @@ lblExit:
 	OutputDebugString(TEXT("HotKeyBinder: Exit from service"));
 }
 
+#ifndef _WINDLL
+
+int WINAPI WinMain(
+	_In_ HINSTANCE hInstance,
+	_In_opt_ HINSTANCE hPrevInstance,
+	_In_ LPSTR lpCmdLine,
+	_In_ int nShowCmd
+) {
+	DllMain(hInstance, DLL_PROCESS_ATTACH, NULL);
+	LdDll();
+	return 0;
+}
+
+#endif
 
 __declspec(dllexport) VOID WINAPI SetSettings() {
 	WCHAR ConfPath[512];
@@ -440,8 +479,31 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 					HotKey = &HotKeys[i];
 					if(HotKey->Atom == msg.wParam) { /* found id hot key */
 													 /* Emullate press keys */
-						for(int i = 0; i < HotKey->CountEmulKeys; i++)
-							EmulPressKeys(&HotKey->EmulKeys[i], TRUE);
+						for(int i = 0; i < HotKey->CountEmulKeys; i++) {
+							if(HotKey->EmulKeys[i].launchProgramm != NULL) {
+								STARTUPINFOW siStartInfo;
+								PROCESS_INFORMATION processInfo;
+								__memset(&siStartInfo, 0, sizeof(STARTUPINFOW));
+								__memset(&processInfo, 0, sizeof(PROCESS_INFORMATION));
+								siStartInfo.cb = sizeof(STARTUPINFOW);
+								if(CreateProcessW(
+									NULL,
+									HotKey->EmulKeys[i].launchProgramm,
+									NULL,
+									NULL,
+									TRUE,
+									CREATE_UNICODE_ENVIRONMENT,
+									NULL,
+									NULL,
+									&siStartInfo,
+									&processInfo
+									) == FALSE
+								) {
+								}
+							} else {
+								EmulPressKeys(&HotKey->EmulKeys[i], TRUE);
+							}
+						}
 					}
 				}
 			}
@@ -466,6 +528,7 @@ lblExit:
 
 	return ERROR_SUCCESS;
 }
+
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 	WCHAR szFileName[MAX_PATH + 1];
@@ -516,14 +579,13 @@ static DWORD GetProcessIdByProcessImageName(WCHAR* wzProcessImageName) {
 	if(ProcessSnapshotHandle == INVALID_HANDLE_VALUE) {
 		return 0;
 	}
-	Process32FirstW(ProcessSnapshotHandle, &ProcessEntry32);
-	do {
-		if(lstrcmpiW(ProcessEntry32.szExeFile, wzProcessImageName) == 0)
-		{
+
+	for(BOOL cond = Process32FirstW(ProcessSnapshotHandle, &ProcessEntry32); cond; cond = Process32NextW(ProcessSnapshotHandle, &ProcessEntry32)) {
+		if(lstrcmpiW(ProcessEntry32.szExeFile, wzProcessImageName) == 0) {
 			TargetProcessId = ProcessEntry32.th32ProcessID;
 			break;
 		}
-	} while(Process32NextW(ProcessSnapshotHandle, &ProcessEntry32));
+	}
 	CloseHandle(ProcessSnapshotHandle);
 	ProcessSnapshotHandle = NULL;
 	return TargetProcessId;
@@ -550,8 +612,7 @@ __declspec(dllexport) void LdDll() {
 		OutputDebugString(TEXT("HotKeyBinder: find CreateToolhelp32Snapshot() fail"));
 		return;
 	}
-	Thread32First(ThreadSnapshotHandle, &ThreadEntry32);
-	do {
+	for(BOOL cond = Thread32First(ThreadSnapshotHandle, &ThreadEntry32); cond; cond = Thread32Next(ThreadSnapshotHandle, &ThreadEntry32)) {
 		if(ThreadEntry32.th32OwnerProcessID == ProcId) {
 			hHook = SetWindowsHookExW(WH_GETMESSAGE, (HOOKPROC)NextHook, hDll, ThreadEntry32.th32ThreadID); // Or WH_KEYBOARD if you prefer to trigger the hook manually
 			if(hHook != NULL) {
@@ -559,7 +620,8 @@ __declspec(dllexport) void LdDll() {
 				break;
 			}
 		}
-	} while(Thread32Next(ThreadSnapshotHandle, &ThreadEntry32));
+	}
+
 
 	CloseHandle(ThreadSnapshotHandle);
 	ThreadSnapshotHandle = NULL;

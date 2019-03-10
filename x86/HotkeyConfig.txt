@@ -1,3 +1,0 @@
-Alt + F9 => Volume Down
-Alt + F10 => Volume Up
-Alt + F8 => Volume Mute
