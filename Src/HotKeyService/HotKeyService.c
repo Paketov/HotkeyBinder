@@ -37,8 +37,8 @@ typedef struct HOT_KEY_INFO {
 } HOT_KEY_INFO;
 
 
-#define HOTKEYBINDER_REG_CONF L"Software\\HotkeyBinder"
-#define HOTKEYBINDER_REG_CONF_ROOT_KEY HKEY_LOCAL_MACHINE
+#define HOTKEYBINDER_REG_CONF L"Software\\HotkeyBinder\\"
+#define HOTKEYBINDER_REG_CONF_ROOT_KEY HKEY_CURRENT_USER //HKEY_LOCAL_MACHINE
 
 //static WCHAR ServiceName[] = L"HotKeyBinder";
 //static SERVICE_STATUS_HANDLE ServiceStatusHandle;
@@ -211,8 +211,8 @@ __declspec(dllexport) void WINAPI ServiceMain(/*DWORD argc, LPWSTR *argv*/) {
 	LPWSTR c;
 	WORD CurKey;
 	int CountKeys;
-	DWORD ReadedSize;
-	WCHAR* ConfigBuf;
+	DWORD ReadedSize = 0;
+	WCHAR* ConfigBuf = NULL;
 	OutputDebugString(TEXT("HotKeyBinder: Start service"));
 	//ServiceStatusHandle = RegisterServiceCtrlHandlerExW(ServiceName, ServiceControlHandlerEx, NULL);
 	//if(!ServiceStatusHandle) {
@@ -222,7 +222,6 @@ __declspec(dllexport) void WINAPI ServiceMain(/*DWORD argc, LPWSTR *argv*/) {
 
 	//UpdateServiceStatus(SERVICE_START_PENDING, 0, 0);
 
-	ReadedSize = 0;
 	if(
 		RegGetValueW(
 			HOTKEYBINDER_REG_CONF_ROOT_KEY,
@@ -321,6 +320,9 @@ lblExit:
 }
 
 #ifndef _WINDLL
+//Used for debug
+
+BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved);
 
 int WINAPI WinMain(
 	_In_ HINSTANCE hInstance,
@@ -328,8 +330,10 @@ int WINAPI WinMain(
 	_In_ LPSTR lpCmdLine,
 	_In_ int nShowCmd
 ) {
-	DllMain(hInstance, DLL_PROCESS_ATTACH, NULL);
-	LdDll();
+	ServiceMain();
+	Sleep(0xFFFFF);
+	//DllMain(hInstance, DLL_PROCESS_ATTACH, NULL);
+	//LdDll();
 	return 0;
 }
 
@@ -440,11 +444,21 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 		Vk = 0;
 		for(int i = 0; i < HotKey->Shortcut.Count; i++) {
 			switch(HotKey->Shortcut.HotKeys[i]) {
+				case VK_RCONTROL: fsModifiers |= (MOD_CONTROL | MOD_RIGHT); break;
+				case VK_LCONTROL: fsModifiers |= (MOD_CONTROL | MOD_LEFT); break;
 				case VK_CONTROL: fsModifiers |= MOD_CONTROL; break;
+
+			
+				case VK_LSHIFT: fsModifiers |= (MOD_SHIFT | MOD_LEFT); break;
+				case VK_RSHIFT: fsModifiers |= (MOD_SHIFT | MOD_RIGHT); break;
 				case VK_SHIFT: fsModifiers |= MOD_SHIFT; break;
-				case VK_MENU: fsModifiers |= MOD_ALT; break;
+
+				case VK_LMENU: fsModifiers |= (MOD_ALT | MOD_LEFT); break;
+				case VK_RMENU: fsModifiers |= (MOD_ALT | MOD_RIGHT); break;
+				case VK_MENU:  fsModifiers |= MOD_ALT; break;
+
 				case VK_LWIN:
-				case VK_RWIN: fsModifiers |= MOD_WIN; break;
+				case VK_RWIN:  fsModifiers |= MOD_WIN; break;
 				default:
 					if(Vk != 0) {
 						//Error = ERROR_BADKEY;
@@ -474,6 +488,7 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 		if(msg.message == WM_HOTKEY) {
 			//int Key = HIWORD(msg.lParam);
 			//int Modifier = LOWORD(msg.lParam);
+
 			if(msg.wParam != IDHOT_SNAPDESKTOP && msg.wParam != IDHOT_SNAPWINDOW) {
 				for(int i = 0; i < CountHotKeys; i++) {
 					HotKey = &HotKeys[i];
