@@ -40,6 +40,8 @@ typedef struct HOT_KEY_INFO {
 #define HOTKEYBINDER_REG_CONF L"Software\\HotkeyBinder\\"
 #define HOTKEYBINDER_REG_CONF_ROOT_KEY HKEY_CURRENT_USER //HKEY_LOCAL_MACHINE
 
+#define WAIT_RERIGISTER_KEYS_MILLISEC 10000 //10 sec
+
 //static WCHAR ServiceName[] = L"HotKeyBinder";
 //static SERVICE_STATUS_HANDLE ServiceStatusHandle;
 //static SERVICE_STATUS ServiceStatus;
@@ -432,70 +434,92 @@ static void EmulPressKeys(HOT_KEYS* HotKeys, BOOL EmulPress) {
 }
 
 
+int GetMessageWithTimeout(MSG *msg, UINT WaitTimeMillisec) {
+	BOOL res;
+	UINT_PTR timerId = SetTimer(NULL, NULL, WaitTimeMillisec, NULL);
+	res = GetMessageW(msg, NULL, 0, 0);
+	KillTimer(NULL, timerId);
+	if (!res)
+		return -1;
+	if (msg->message == WM_TIMER && msg->hwnd == NULL && msg->wParam == timerId)
+		return 1;
+	return 0;
+}
+
 static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
-	HOT_KEY_INFO* HotKey = NULL;
+	BOOL IsRegisterAgain;
+	HOT_KEY_INFO* HotKey;
 	UINT fsModifiers;
 	UINT Vk;
-	MSG msg = { 0 };
-	//Error = ERROR_SUCCESS;
+	MSG msg;
+	STARTUPINFOW siStartInfo;
+	PROCESS_INFORMATION processInfo;
+	int GetMsgRes;
+	do {
+		IsRegisterAgain = FALSE;
+		HotKey = NULL;
+		__memset(&msg, 0, sizeof(msg));
+		
+		
+		//Error = ERROR_SUCCESS;
 
-	for (int i = 0; i < CountHotKeys; i++) {
-		HotKey = &HotKeys[i];
-		fsModifiers = 0;
-		Vk = 0;
-		for (int i = 0; i < HotKey->Shortcut.Count; i++) {
-			switch (HotKey->Shortcut.HotKeys[i]) {
-			case VK_RCONTROL: fsModifiers |= (MOD_CONTROL | MOD_RIGHT); break;
-			case VK_LCONTROL: fsModifiers |= (MOD_CONTROL | MOD_LEFT); break;
-			case VK_CONTROL: fsModifiers |= MOD_CONTROL; break;
+		for (int i = 0; i < CountHotKeys; i++) {
+			HotKey = &HotKeys[i];
+			fsModifiers = 0;
+			Vk = 0;
+			for (int i = 0; i < HotKey->Shortcut.Count; i++) {
+				switch (HotKey->Shortcut.HotKeys[i]) {
+				case VK_RCONTROL: fsModifiers |= (MOD_CONTROL | MOD_RIGHT); break;
+				case VK_LCONTROL: fsModifiers |= (MOD_CONTROL | MOD_LEFT); break;
+				case VK_CONTROL: fsModifiers |= MOD_CONTROL; break;
 
-			case VK_LSHIFT: fsModifiers |= (MOD_SHIFT | MOD_LEFT); break;
-			case VK_RSHIFT: fsModifiers |= (MOD_SHIFT | MOD_RIGHT); break;
-			case VK_SHIFT: fsModifiers |= MOD_SHIFT; break;
+				case VK_LSHIFT: fsModifiers |= (MOD_SHIFT | MOD_LEFT); break;
+				case VK_RSHIFT: fsModifiers |= (MOD_SHIFT | MOD_RIGHT); break;
+				case VK_SHIFT: fsModifiers |= MOD_SHIFT; break;
 
-			case VK_LMENU: fsModifiers |= (MOD_ALT | MOD_LEFT); break;
-			case VK_RMENU: fsModifiers |= (MOD_ALT | MOD_RIGHT); break;
-			case VK_MENU:  fsModifiers |= MOD_ALT; break;
+				case VK_LMENU: fsModifiers |= (MOD_ALT | MOD_LEFT); break;
+				case VK_RMENU: fsModifiers |= (MOD_ALT | MOD_RIGHT); break;
+				case VK_MENU:  fsModifiers |= MOD_ALT; break;
 
-			case VK_LWIN:  fsModifiers |= (MOD_WIN | MOD_LEFT); break;
-			case VK_RWIN:  fsModifiers |= (MOD_WIN | MOD_RIGHT); break;
-			default:
-				if (Vk != 0) {
-					//Error = ERROR_BADKEY;
-					OutputDebugString(TEXT("HotKeyBinder: So much keys"));
-					goto lblExit;
-				}
-				else {
-					Vk = HotKey->Shortcut.HotKeys[i];
-					break;
+				case VK_LWIN:  fsModifiers |= (MOD_WIN | MOD_LEFT); break;
+				case VK_RWIN:  fsModifiers |= (MOD_WIN | MOD_RIGHT); break;
+				default:
+					if (Vk != 0) {
+						//Error = ERROR_BADKEY;
+						OutputDebugString(TEXT("HotKeyBinder: So much keys"));
+						goto lblExit;
+					}
+					else {
+						Vk = HotKey->Shortcut.HotKeys[i];
+						break;
+					}
 				}
 			}
+			if (Vk == 0) {
+				//Error = ERROR_BADKEY;
+				goto lblExit;
+			}
+			HotKey->Atom = GlobalAddAtom(MAKEINTATOM(1024 + i));
+			if (!RegisterHotKey(NULL, HotKey->Atom, fsModifiers, Vk)) {
+				OutputDebugString(TEXT("HotKeyBinder: RegisterHotKey() fail"));
+				//Error = GetLastError();
+				goto lblExit;
+			}
+			HotKey->Registred = TRUE;
 		}
-		if (Vk == 0) {
-			//Error = ERROR_BADKEY;
-			goto lblExit;
-		}
-		HotKey->Atom = GlobalAddAtom(MAKEINTATOM(1024 + i));
-		if (!RegisterHotKey(NULL, HotKey->Atom, fsModifiers, Vk)) {
-			OutputDebugString(TEXT("HotKeyBinder: RegisterHotKey() fail"));
-			//Error = GetLastError();
-			goto lblExit;
-		}
-		HotKey->Registred = TRUE;
-	}
+		//UpdateServiceStatus(SERVICE_RUNNING, SERVICE_STOPPED, 0);
+		//while (GetMessageW(&msg, NULL, 0, 0) != 0) {
+		while((GetMsgRes = GetMessageWithTimeout(&msg, WAIT_RERIGISTER_KEYS_MILLISEC)) >= 0){
+			if (msg.message == WM_HOTKEY) {
+				//int Key = HIWORD(msg.lParam);
+				//int Modifier = LOWORD(msg.lParam);
 
-	//UpdateServiceStatus(SERVICE_RUNNING, SERVICE_STOPPED, 0);
-	while (GetMessageW(&msg, NULL, 0, 0) != 0) {
-		if (msg.message == WM_HOTKEY) {
-			//int Key = HIWORD(msg.lParam);
-			//int Modifier = LOWORD(msg.lParam);
-
-			if (msg.wParam != IDHOT_SNAPDESKTOP && msg.wParam != IDHOT_SNAPWINDOW) {
-				for (int i = 0; i < CountHotKeys; i++) {
-					HotKey = &HotKeys[i];
-					if (HotKey->Atom == msg.wParam) { /* found id hot key */			
-						for (int i = 0; i < HotKey->Shortcut.Count; i++) {
-							switch (HotKey->Shortcut.HotKeys[i]) {
+				if (msg.wParam != IDHOT_SNAPDESKTOP && msg.wParam != IDHOT_SNAPWINDOW) {
+					for (int i = 0; i < CountHotKeys; i++) {
+						HotKey = &HotKeys[i];
+						if (HotKey->Atom == msg.wParam) { /* found id hot key */
+							for (int i = 0; i < HotKey->Shortcut.Count; i++) {
+								switch (HotKey->Shortcut.HotKeys[i]) {
 								case VK_RMENU:
 								case VK_LMENU:
 
@@ -510,60 +534,66 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 									if (!(GetKeyState(HotKey->Shortcut.HotKeys[i]) & 0x8000)) //Is this key is not pressed
 										goto lblContinue1;
 									break;
-							}
-						}
-						/* Emullate press keys */
-						for (int i = 0; i < HotKey->CountEmulKeys; i++) {
-							if (HotKey->EmulKeys[i].launchProgramm != NULL) {
-								STARTUPINFOW siStartInfo;
-								PROCESS_INFORMATION processInfo;
-								__memset(&siStartInfo, 0, sizeof(STARTUPINFOW));
-								__memset(&processInfo, 0, sizeof(PROCESS_INFORMATION));
-								siStartInfo.cb = sizeof(STARTUPINFOW);
-								if (CreateProcessW(
-									NULL,
-									HotKey->EmulKeys[i].launchProgramm,
-									NULL,
-									NULL,
-									TRUE,
-									CREATE_UNICODE_ENVIRONMENT,
-									NULL,
-									NULL,
-									&siStartInfo,
-									&processInfo
-									) == FALSE
-									) {
 								}
-							} else {
-								EmulPressKeys(&HotKey->EmulKeys[i], TRUE);
 							}
+							/* Emullate press keys */
+							for (int i = 0; i < HotKey->CountEmulKeys; i++) {
+								if (HotKey->EmulKeys[i].launchProgramm != NULL) {
+									__memset(&siStartInfo, 0, sizeof(STARTUPINFOW));
+									__memset(&processInfo, 0, sizeof(PROCESS_INFORMATION));
+									siStartInfo.cb = sizeof(STARTUPINFOW);
+									if (CreateProcessW(
+										NULL,
+										HotKey->EmulKeys[i].launchProgramm,
+										NULL,
+										NULL,
+										TRUE,
+										CREATE_UNICODE_ENVIRONMENT,
+										NULL,
+										NULL,
+										&siStartInfo,
+										&processInfo
+										) == TRUE
+									) {
+										if(processInfo.hProcess != 0)
+											CloseHandle(processInfo.hProcess);
+										if (processInfo.hThread != 0)
+											CloseHandle(processInfo.hThread);
+									}
+								} else {
+									EmulPressKeys(&HotKey->EmulKeys[i], TRUE);
+								}
+							}
+						lblContinue1:;
 						}
-					lblContinue1:;
+
 					}
-
 				}
+			} else if (msg.message == WM_TERMINATE_THREAD) { /* If need out of loop */
+				break;
+			} else if (GetMsgRes == 1) { //Is recived timeout
+				IsRegisterAgain = TRUE;
+				break;
 			}
-		} else if (msg.message == WM_TERMINATE_THREAD) { /* If need out of loop */
-			break;
 		}
-	}
-lblExit:
-	if (HotKeys != NULL) {
-		for (int i = 0; i < CountHotKeys; i++) {
-			HotKey = &HotKeys[i];
-			if (HotKey->Registred && HotKey->Atom != 0) {
-				UnregisterHotKey(NULL, HotKey->Atom);
+	lblExit:
+		if (HotKeys != NULL) {
+			for (int i = 0; i < CountHotKeys; i++) {
+				HotKey = &HotKeys[i];
+				if (HotKey->Registred && HotKey->Atom != 0) {
+					UnregisterHotKey(NULL, HotKey->Atom);
+				}
+				if (HotKey->Atom != 0) {
+					GlobalDeleteAtom(HotKey->Atom);
+				}
+				HotKey->Registred = FALSE;
+				HotKey->Atom = 0;
 			}
-			if (HotKey->Atom != 0) {
-				GlobalDeleteAtom(HotKey->Atom);
-			}
-			HotKey->Registred = FALSE;
-			HotKey->Atom = 0;
 		}
-	}
-
+	} while (IsRegisterAgain);
 	return ERROR_SUCCESS;
 }
+
 
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
