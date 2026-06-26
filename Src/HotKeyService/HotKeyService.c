@@ -434,7 +434,7 @@ static void EmulPressKeys(HOT_KEYS* HotKeys, BOOL EmulPress) {
 }
 
 
-int GetMessageWithTimeout(MSG *msg, UINT WaitTimeMillisec) {
+static int GetMessageWithTimeout(MSG *msg, UINT WaitTimeMillisec) {
 	BOOL res;
 	UINT_PTR timerId = SetTimer(NULL, NULL, WaitTimeMillisec, NULL);
 	res = GetMessageW(msg, NULL, 0, 0);
@@ -455,6 +455,7 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 	STARTUPINFOW siStartInfo;
 	PROCESS_INFORMATION processInfo;
 	int GetMsgRes;
+	WORD AtomId = 1024;
 	do {
 		IsRegisterAgain = FALSE;
 		HotKey = NULL;
@@ -499,7 +500,10 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 				//Error = ERROR_BADKEY;
 				goto lblExit;
 			}
-			HotKey->Atom = GlobalAddAtom(MAKEINTATOM(1024 + i));
+			if(AtomId >= ((WORD)MAXINTATOM))
+				AtomId = 1024;
+			AtomId++;
+			HotKey->Atom = GlobalAddAtom(MAKEINTATOM(AtomId));
 			if (!RegisterHotKey(NULL, HotKey->Atom, fsModifiers, Vk)) {
 				OutputDebugString(TEXT("HotKeyBinder: RegisterHotKey() fail"));
 				//Error = GetLastError();
