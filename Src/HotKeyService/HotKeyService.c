@@ -507,9 +507,14 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 			if (!RegisterHotKey(NULL, HotKey->Atom, fsModifiers, Vk)) {
 				OutputDebugString(TEXT("HotKeyBinder: RegisterHotKey() fail"));
 				//Error = GetLastError();
-				goto lblExit;
+				if (HotKey->Atom != 0) {
+					GlobalDeleteAtom(HotKey->Atom);
+				}
+				HotKey->Registred = FALSE;
+				HotKey->Atom = 0;
+			} else {
+				HotKey->Registred = TRUE;
 			}
-			HotKey->Registred = TRUE;
 		}
 		//UpdateServiceStatus(SERVICE_RUNNING, SERVICE_STOPPED, 0);
 		//while (GetMessageW(&msg, NULL, 0, 0) != 0) {
