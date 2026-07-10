@@ -526,6 +526,8 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 				if (msg.wParam != IDHOT_SNAPDESKTOP && msg.wParam != IDHOT_SNAPWINDOW) {
 					for (int i = 0; i < CountHotKeys; i++) {
 						HotKey = &HotKeys[i];
+						if(!HotKey->Registred)
+							goto lblContinue1;
 						if (HotKey->Atom == msg.wParam) { /* found id hot key */
 							for (int i = 0; i < HotKey->Shortcut.Count; i++) {
 								switch (HotKey->Shortcut.HotKeys[i]) {
