@@ -500,10 +500,15 @@ static DWORD WINAPI ServiceWorkerThread(LPVOID lpParam) {
 				//Error = ERROR_BADKEY;
 				goto lblExit;
 			}
+
+			AtomId++;
 			if(AtomId >= ((WORD)MAXINTATOM))
 				AtomId = 1024;
-			AtomId++;
 			HotKey->Atom = GlobalAddAtom(MAKEINTATOM(AtomId));
+			if (HotKey->Atom == 0) {
+				HotKey->Registred = FALSE;
+				continue;
+			}
 			if (!RegisterHotKey(NULL, HotKey->Atom, fsModifiers, Vk)) {
 				OutputDebugString(TEXT("HotKeyBinder: RegisterHotKey() fail"));
 				//Error = GetLastError();
